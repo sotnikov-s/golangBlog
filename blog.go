@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+	"log"
 )
 
 // base format: Mon Jan 2 15:04:05 -0700 MST 2006
@@ -61,7 +62,7 @@ func (u User) NoPosts() bool {
 	return u.PostCount == 0
 }
 
-func startServer(addr string) {
+func startServer(addr string, handler http.Handler) {
 	files, err := ioutil.ReadDir("data/accounts")
 	if err != nil {
 		panic(err)
@@ -77,8 +78,8 @@ func startServer(addr string) {
 		ID++
 	}
 
-	fmt.Println("Starting server at", addr)
-	http.ListenAndServe(addr, nil)
+	fmt.Println("Starting server at", addr, "/n")
+	http.ListenAndServe(addr, handler)
 }
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
@@ -366,18 +367,45 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func main() {
-	http.HandleFunc("/", mainHandler)
-	http.HandleFunc("/newPost", newPostHandler)
-	http.HandleFunc("/logout", logoutHandler)
-	http.HandleFunc("/register", registerHandler)
-	http.HandleFunc("/registerAlreadyTaken", registerUsernameAlreadyTakenHandler)
-	http.HandleFunc("/incorrectPassword", incorrectPasswordHandler)
-	http.HandleFunc("/registerSuccess", registerSuccessHandler)
-	http.HandleFunc("/userList", userListHandler)
-	http.HandleFunc("/users/", usersHandler)
-	http.Handle("/images/", http.StripPrefix("/images", http.FileServer(http.Dir("./images"))))
-	http.Handle("/users/images/", http.StripPrefix("/users/images", http.FileServer(http.Dir("./images"))))
+func panicMiddleware (next http.Handler) http.Handler {
+	return http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+		fmt.Println("panicMiddleware", r.URL.Path)
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("recovered", err)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
-	startServer(":8080")
+func accessLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("accessLogMiddleware", r.URL.Path)
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		fmt.Printf("[%s] %s, %s %s\n-\n", r.Method, r.RemoteAddr, r.URL.Path, time.Since(start))
+	})
+}
+
+func main() {
+	siteMux := http.NewServeMux()
+
+	siteMux.HandleFunc("/", mainHandler)
+	siteMux.HandleFunc("/newPost", newPostHandler)
+	siteMux.HandleFunc("/logout", logoutHandler)
+	siteMux.HandleFunc("/register", registerHandler)
+	siteMux.HandleFunc("/registerAlreadyTaken", registerUsernameAlreadyTakenHandler)
+	siteMux.HandleFunc("/incorrectPassword", incorrectPasswordHandler)
+	siteMux.HandleFunc("/registerSuccess", registerSuccessHandler)
+	siteMux.HandleFunc("/userList", userListHandler)
+	siteMux.HandleFunc("/users/", usersHandler)
+	siteMux.Handle("/images/", http.StripPrefix("/images", http.FileServer(http.Dir("./images"))))
+	siteMux.Handle("/users/images/", http.StripPrefix("/users/images", http.FileServer(http.Dir("./images"))))
+
+	siteHandler := accessLogMiddleware(siteMux)
+	siteHandler = panicMiddleware(siteHandler)
+
+	startServer(":8080", siteHandler)
 }
