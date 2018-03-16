@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"html/template"
 	"io/ioutil"
-	"net/http"
-	"time"
 	"log"
+	"net/http"
+	"src/github.com/pkg/errors"
+	"time"
 )
 
 // base format: Mon Jan 2 15:04:05 -0700 MST 2006
@@ -65,20 +66,26 @@ func (u User) NoPosts() bool {
 func startServer(addr string, handler http.Handler) {
 	files, err := ioutil.ReadDir("data/accounts")
 	if err != nil {
-		panic(err)
+		log.Println(err, "reading directory error")
+		return
 	}
 	for _, file := range files {
 		data, err := ioutil.ReadFile("data/accounts/" + file.Name())
+		if err != nil {
+			log.Println(err, "reading file error")
+			return
+		}
 		us := User{}
 		err = json.Unmarshal(data, &us)
 		if err != nil {
-			panic(err)
+			log.Println(err, "unmarshal error")
+			return
 		}
 		users = append(users, &us)
 		ID++
 	}
 
-	fmt.Println("Starting server at", addr, "/n")
+	fmt.Println("Server started at", addr, "\n")
 	http.ListenAndServe(addr, handler)
 }
 
@@ -98,10 +105,10 @@ func mainNoCookieHandler(w http.ResponseWriter, r *http.Request) {
 		mainNoCookiePostHandler(w, r)
 	} else {
 		tpl, err := template.ParseFiles("templates/noCookie.html", "templates/footer.html", "templates/noCookieHeader.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "noCookie", nil)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "noCookie", nil)
+		if err != nil { panic(err) }
 		return
 	}
 }
@@ -112,7 +119,7 @@ func mainNoCookiePostHandler(w http.ResponseWriter, r *http.Request) {
 			Name:    "username",
 			Value:   r.FormValue("username"),
 			Expires: time.Now().Add(10 * time.Hour),
-			Path: "/",
+			Path:    "/",
 		}
 		http.SetCookie(w, usernameCookie)
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -134,7 +141,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := &http.Cookie{
-		Name:    "username",
+		Name:   "username",
 		MaxAge: -1,
 	}
 	http.SetCookie(w, c)
@@ -150,10 +157,10 @@ func newPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		tpl, err := template.ParseFiles("templates/header.html", "templates/newPost.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "newPost", nil)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "newPost", nil)
+		if err != nil { panic(err) }
 	} else {
 		username := usernameCookie.Value
 		newPost := Post{
@@ -161,8 +168,12 @@ func newPostHandler(w http.ResponseWriter, r *http.Request) {
 			Body:  r.FormValue("body"),
 			Date:  time.Now().Format(timeFormat),
 		}
+		err := getUser(username).addUserToServer()
+		if err != nil {
+			panic(err)
+		}
 		getUser(username).addPost(newPost)
-		getUser(username).addUserToServer()
+
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
@@ -188,7 +199,7 @@ func setID() {
 	ID++
 }
 
-func addUserToServer(incLogin string, incPassword string) {
+func addUserToServer(incLogin string, incPassword string) error {
 	newUser := &User{
 		Username:  incLogin,
 		Password:  incPassword,
@@ -198,19 +209,21 @@ func addUserToServer(incLogin string, incPassword string) {
 	}
 	parsedNewUser, err := json.Marshal(newUser)
 	if err != nil {
-		panic(err)
+		return errors.Wrap(err, "error while adding user data to server")
 	}
 
 	ioutil.WriteFile("data/accounts/"+incLogin+".txt", parsedNewUser, 0600)
+	return nil
 }
 
-func (u User) addUserToServer() {
+func (u User) addUserToServer() error {
 	parsedNewUser, err := json.Marshal(u)
 	if err != nil {
-		panic(err)
+		return errors.Wrap(err, "error while adding user data to server")
 	}
 
 	ioutil.WriteFile("data/accounts/"+u.Username+".txt", parsedNewUser, 0600)
+	return nil
 }
 
 func addUserToUsers(incLogin string, incPassword string) {
@@ -233,10 +246,10 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/register.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "register", nil)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "register", nil)
+		if err != nil { panic(err) }
 	} else {
 		incAccount := r.FormValue("account")
 		incPassword := r.FormValue("password")
@@ -244,12 +257,14 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
 			return
 		}
-		addUserToServer(incAccount, incPassword)
+		err := addUserToServer(incAccount, incPassword)
+		if err != nil { panic(err) }
+
 		addUserToUsers(incAccount, incPassword)
 		setID()
 		registerSuccessCookie := http.Cookie{
-			Name:    "registerSuccess",
-			Value:   "true",
+			Name:   "registerSuccess",
+			Value:  "true",
 			MaxAge: 1,
 		}
 		http.SetCookie(w, &registerSuccessCookie)
@@ -265,10 +280,10 @@ func registerUsernameAlreadyTakenHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if r.Method != http.MethodPost {
 		tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerUsernameAlreadyTaken.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "registerUsernameAlreadyTaken", nil)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "registerUsernameAlreadyTaken", nil)
+		if err != nil { panic(err) }
 	} else {
 		incAccount := r.FormValue("account")
 		incPassword := r.FormValue("password")
@@ -310,11 +325,10 @@ func registerSuccessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerSuccess.html")
-	if err != nil {
-		panic(err)
-	}
-	tpl.ExecuteTemplate(w, "registerSuccess", nil)
+	if err != nil { panic(err) }
 
+	err = tpl.ExecuteTemplate(w, "registerSuccess", nil)
+	if err != nil { panic(err) }
 }
 
 func incorrectPasswordHandler(w http.ResponseWriter, r *http.Request) {
@@ -324,10 +338,10 @@ func incorrectPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/incorrectPassword.html")
-	if err != nil {
-		panic(err)
-	}
-	tpl.ExecuteTemplate(w, "incorrectPassword", nil)
+	if err != nil { panic(err) }
+
+	err = tpl.ExecuteTemplate(w, "incorrectPassword", nil)
+	if err != nil { panic(err) }
 }
 
 func userListHandler(w http.ResponseWriter, r *http.Request) {
@@ -337,10 +351,10 @@ func userListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tpl, err := template.ParseFiles("templates/header.html", "templates/userList.html")
-	if err != nil {
-		panic(err)
-	}
-	tpl.ExecuteTemplate(w, "userList", users)
+	if err != nil { panic(err) }
+
+	err = tpl.ExecuteTemplate(w, "userList", users)
+	if err != nil { panic(err) }
 }
 
 func usersHandler(w http.ResponseWriter, r *http.Request) {
@@ -353,22 +367,22 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 	if usernameCookie.Value != username {
 		user := getUser(username)
 		tpl, err := template.ParseFiles("templates/userPage.html", "templates/header.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "userPage", user)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "userPage", user)
+		if err != nil { panic(err) }
 	} else {
 		user := getUser(username)
 		tpl, err := template.ParseFiles("templates/homePage.html", "templates/header.html")
-		if err != nil {
-			panic(err)
-		}
-		tpl.ExecuteTemplate(w, "homePage", user)
+		if err != nil { panic(err) }
+
+		err = tpl.ExecuteTemplate(w, "homePage", user)
+		if err != nil { panic(err) }
 	}
 }
 
-func panicMiddleware (next http.Handler) http.Handler {
-	return http.HandlerFunc(func (w http.ResponseWriter, r *http.Request) {
+func panicMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("panicMiddleware", r.URL.Path)
 		defer func() {
 			if err := recover(); err != nil {
