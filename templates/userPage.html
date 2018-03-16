@@ -1,0 +1,29 @@
+{{ define "userPage" }}
+
+{{ template "header" }}
+
+<style>
+    .col {
+        background: #FFFFFF; /* Цвет фона */
+        width: 500px; /* Ширина блока */
+        padding: 10px; /* Поля */
+        font-size: 1em; /* Размер шрифта */
+        word-wrap: break-word; /* Перенос слов */
+    }
+</style>
+
+<h1>This page belongs to <i>{{.Username}}</i></h1>
+<br>
+ID: {{.ID}}<br>
+{{if .NoPosts}} This user doesn't have posted thoughts yet.
+{{else}}
+{{.Username}} has {{.PostCount}} posts:<br>
+{{range .Posts}}
+<div class="col">
+    <p>---------{{.Date}} <b>{{.Title}}</b>---------<br>
+    {{.Body}}</p><br><br>
+</div>
+{{ end }}
+{{ end }}
+
+{{ end }}

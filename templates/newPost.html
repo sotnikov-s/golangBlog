@@ -1,0 +1,15 @@
+{{define "newPost"}}
+
+{{template "header"}}
+
+<html>
+    <body>
+    <form action="/newPost" method="post">
+        Title: <br /><input type="text" name="title" maxlength="20" minlength="1"><br />
+        Body: <br /><textarea name="body" cols="40" rows="5" maxlength="300"></textarea><br />
+        <input type="submit" value="Submit">
+    </form>
+    </body>
+</html>
+
+{{end}}

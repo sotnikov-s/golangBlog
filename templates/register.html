@@ -1,0 +1,17 @@
+{{ define "register" }}
+
+{{ template "noCookieHeader"}}
+
+<html>
+<body>
+Choose yourself username and password and press <i>Register</i><br>
+<br>
+<form action="/register" method="post">
+    <input type="text" name="account" maxlength="16" minlength="1">
+    <input type="password" name="password" maxlength="16" minlength="3">
+    <input type="submit" value="Register">
+</form>
+</body>
+</html>
+
+{{ end }}

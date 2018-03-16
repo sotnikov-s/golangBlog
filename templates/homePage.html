@@ -1,0 +1,29 @@
+{{ define "homePage" }}
+
+{{ template "header" }}
+
+<style>
+    .col {
+        background: #FFFFFF; /* Цвет фона */
+        width: 500px; /* Ширина блока */
+        padding: 10px; /* Поля */
+        font-size: 1em; /* Размер шрифта */
+        word-wrap: break-word; /* Перенос слов */
+    }
+</style>
+
+<h1>Have a nice day, <i>{{.Username}}</i>!</h1>
+<br>
+ID: {{.ID}}<br>
+{{if .NoPosts}} You don't have posted thoughts yet. What about <a href="/newPost">creating</a> the first one?
+{{else}}
+You have {{.PostCount}} posts:<br>
+{{range .Posts}}
+<div class="col">
+    <p>---------{{.Date}} <b>{{.Title}}</b>---------<br>
+    {{.Body}}</p><br><br>
+</div>
+{{ end }}
+{{ end }}
+
+{{ end }}
