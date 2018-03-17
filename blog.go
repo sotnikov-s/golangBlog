@@ -91,7 +91,7 @@ func startServer(addr string, handler http.Handler) {
 
 func mainHandler(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie("username")
-	if err == http.ErrNoCookie || c.Value == "" {
+	if err == http.ErrNoCookie {
 		mainNoCookieHandler(w, r)
 	} else {
 		username := c.Value
@@ -291,13 +291,14 @@ func registerUsernameAlreadyTakenHandler(w http.ResponseWriter, r *http.Request)
 			http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
 			return
 		}
-		addUserToServer(incAccount, incPassword)
+		err := addUserToServer(incAccount, incPassword)
+		if err != nil { panic(err) }
 		addUserToUsers(incAccount, incPassword)
 		setID()
 		registerSuccessCookie := http.Cookie{
 			Name:    "registerSuccess",
 			Value:   "true",
-			Expires: time.Now().Add(1 * time.Second),
+			Expires: time.Now().Add(10 * time.Second),
 		}
 		http.SetCookie(w, &registerSuccessCookie)
 		http.Redirect(w, r, "/registerSuccess", http.StatusFound)
@@ -319,11 +320,12 @@ func registerSuccessHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
-	_, err = r.Cookie("registerSuccess")
+	registerSuccessCookie, err := r.Cookie("registerSuccess")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+	registerSuccessCookie.MaxAge = -1
 	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerSuccess.html")
 	if err != nil { panic(err) }
 
