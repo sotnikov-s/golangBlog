@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"src/github.com/julienschmidt/httprouter"
 	"src/github.com/pkg/errors"
 	"time"
 )
@@ -42,15 +43,6 @@ func getUser(username string) *User {
 func (u *User) addPost(post Post) {
 	u.Posts = append(u.Posts, post)
 	u.PostCount++
-}
-
-func (u User) reversePosts() User {
-	rp := make([]Post, len(u.Posts), cap(u.Posts))
-	for i := range u.Posts {
-		rp = append(rp, u.Posts[len(u.Posts)-1-i])
-	}
-	u.Posts = rp
-	return u
 }
 
 type Post struct {
@@ -89,10 +81,18 @@ func startServer(addr string, handler http.Handler) {
 	http.ListenAndServe(addr, handler)
 }
 
-func mainHandler(w http.ResponseWriter, r *http.Request) {
+func mainGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	c, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
-		mainNoCookieHandler(w, r)
+		tpl, err := template.ParseFiles("templates/noCookie.html", "templates/footer.html", "templates/noCookieHeader.html")
+		if err != nil {
+			panic(err)
+		}
+
+		err = tpl.ExecuteTemplate(w, "noCookie", nil)
+		if err != nil {
+			panic(err)
+		}
 	} else {
 		username := c.Value
 		http.Redirect(w, r, "/users/"+username, http.StatusFound)
@@ -100,20 +100,12 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func mainNoCookieHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		mainNoCookiePostHandler(w, r)
-	} else {
-		tpl, err := template.ParseFiles("templates/noCookie.html", "templates/footer.html", "templates/noCookieHeader.html")
-		if err != nil { panic(err) }
-
-		err = tpl.ExecuteTemplate(w, "noCookie", nil)
-		if err != nil { panic(err) }
+func mainPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	usernameCookie, err := r.Cookie("username")
+	if err != http.ErrNoCookie {
+		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
-}
-
-func mainNoCookiePostHandler(w http.ResponseWriter, r *http.Request) {
 	if tryToLogIn(r.FormValue("username"), r.FormValue("password")) == Correct {
 		usernameCookie := &http.Cookie{
 			Name:    "username",
@@ -134,7 +126,7 @@ func mainNoCookiePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func logoutHandler(w http.ResponseWriter, r *http.Request) {
+func logoutHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	_, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -149,33 +141,42 @@ func logoutHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func newPostHandler(w http.ResponseWriter, r *http.Request) {
+func newPostGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	_, err := r.Cookie("username")
+	if err == http.ErrNoCookie {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	tpl, err := template.ParseFiles("templates/header.html", "templates/newPost.html")
+	if err != nil {
+		panic(err)
+	}
+
+	err = tpl.ExecuteTemplate(w, "newPost", nil)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func newPostPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	if r.Method != http.MethodPost {
-		tpl, err := template.ParseFiles("templates/header.html", "templates/newPost.html")
-		if err != nil { panic(err) }
-
-		err = tpl.ExecuteTemplate(w, "newPost", nil)
-		if err != nil { panic(err) }
-	} else {
-		username := usernameCookie.Value
-		newPost := Post{
-			Title: r.FormValue("title"),
-			Body:  r.FormValue("body"),
-			Date:  time.Now().Format(timeFormat),
-		}
-		err := getUser(username).addUserToServer()
-		if err != nil {
-			panic(err)
-		}
-		getUser(username).addPost(newPost)
-
-		http.Redirect(w, r, "/", http.StatusFound)
+	username := usernameCookie.Value
+	newPost := Post{
+		Title: r.FormValue("title"),
+		Body:  r.FormValue("body"),
+		Date:  time.Now().Format(timeFormat),
 	}
+	err = getUser(username).addUserToServer()
+	if err != nil {
+		panic(err)
+	}
+	getUser(username).addPost(newPost)
+
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func tryToLogIn(incLogin string, incPassword string) string {
@@ -238,71 +239,93 @@ func addUserToUsers(incLogin string, incPassword string) {
 	users = append(users, newUser)
 }
 
-func registerHandler(w http.ResponseWriter, r *http.Request) {
+func registerGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err != http.ErrNoCookie {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
-	if r.Method != http.MethodPost {
-		tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/register.html")
-		if err != nil { panic(err) }
+	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/register.html")
+	if err != nil {
+		panic(err)
+	}
 
-		err = tpl.ExecuteTemplate(w, "register", nil)
-		if err != nil { panic(err) }
-	} else {
-		incAccount := r.FormValue("account")
-		incPassword := r.FormValue("password")
-		if UsernameExists(incAccount) {
-			http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
-			return
-		}
-		err := addUserToServer(incAccount, incPassword)
-		if err != nil { panic(err) }
-
-		addUserToUsers(incAccount, incPassword)
-		setID()
-		registerSuccessCookie := http.Cookie{
-			Name:   "registerSuccess",
-			Value:  "true",
-			MaxAge: 1,
-		}
-		http.SetCookie(w, &registerSuccessCookie)
-		http.Redirect(w, r, "/registerSuccess", http.StatusFound)
+	err = tpl.ExecuteTemplate(w, "register", nil)
+	if err != nil {
+		panic(err)
 	}
 }
 
-func registerUsernameAlreadyTakenHandler(w http.ResponseWriter, r *http.Request) {
+func registerPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err != http.ErrNoCookie {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
-	if r.Method != http.MethodPost {
-		tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerUsernameAlreadyTaken.html")
-		if err != nil { panic(err) }
-
-		err = tpl.ExecuteTemplate(w, "registerUsernameAlreadyTaken", nil)
-		if err != nil { panic(err) }
-	} else {
-		incAccount := r.FormValue("account")
-		incPassword := r.FormValue("password")
-		if UsernameExists(incAccount) {
-			http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
-			return
-		}
-		err := addUserToServer(incAccount, incPassword)
-		if err != nil { panic(err) }
-		addUserToUsers(incAccount, incPassword)
-		setID()
-		registerSuccessCookie := http.Cookie{
-			Name:    "registerSuccess",
-			Value:   "true",
-			Expires: time.Now().Add(10 * time.Second),
-		}
-		http.SetCookie(w, &registerSuccessCookie)
-		http.Redirect(w, r, "/registerSuccess", http.StatusFound)
+	incAccount := r.FormValue("account")
+	incPassword := r.FormValue("password")
+	if UsernameExists(incAccount) {
+		http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
+		return
 	}
+	err = addUserToServer(incAccount, incPassword)
+	if err != nil {
+		panic(err)
+	}
+
+	addUserToUsers(incAccount, incPassword)
+	setID()
+	registerSuccessCookie := http.Cookie{
+		Name:   "registerSuccess",
+		Value:  "true",
+		MaxAge: 1,
+	}
+	http.SetCookie(w, &registerSuccessCookie)
+	http.Redirect(w, r, "/registerSuccess", http.StatusFound)
+}
+
+func registerUsernameAlreadyTakenGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	usernameCookie, err := r.Cookie("username")
+	if err != http.ErrNoCookie {
+		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
+		return
+	}
+	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerUsernameAlreadyTaken.html")
+	if err != nil {
+		panic(err)
+	}
+
+	err = tpl.ExecuteTemplate(w, "registerUsernameAlreadyTaken", nil)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func registerUsernameAlreadyTakenPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	usernameCookie, err := r.Cookie("username")
+	if err != http.ErrNoCookie {
+		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
+		return
+	}
+	incAccount := r.FormValue("account")
+	incPassword := r.FormValue("password")
+	if UsernameExists(incAccount) {
+		http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
+		return
+	}
+	err = addUserToServer(incAccount, incPassword)
+	if err != nil {
+		panic(err)
+	}
+	addUserToUsers(incAccount, incPassword)
+	setID()
+	registerSuccessCookie := http.Cookie{
+		Name:    "registerSuccess",
+		Value:   "true",
+		Expires: time.Now().Add(10 * time.Second),
+	}
+	http.SetCookie(w, &registerSuccessCookie)
+	http.Redirect(w, r, "/registerSuccess", http.StatusFound)
 }
 
 func UsernameExists(username string) bool {
@@ -314,7 +337,7 @@ func UsernameExists(username string) bool {
 	return false
 }
 
-func registerSuccessHandler(w http.ResponseWriter, r *http.Request) {
+func registerSuccessHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err != http.ErrNoCookie {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
@@ -327,39 +350,77 @@ func registerSuccessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	registerSuccessCookie.MaxAge = -1
 	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerSuccess.html")
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	err = tpl.ExecuteTemplate(w, "registerSuccess", nil)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 }
 
-func incorrectPasswordHandler(w http.ResponseWriter, r *http.Request) {
+func incorrectPasswordGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err != http.ErrNoCookie {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
 	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/incorrectPassword.html")
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	err = tpl.ExecuteTemplate(w, "incorrectPassword", nil)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 }
 
-func userListHandler(w http.ResponseWriter, r *http.Request) {
+func incorrectPasswordPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	usernameCookie, err := r.Cookie("username")
+	if err != http.ErrNoCookie {
+		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
+		return
+	}
+	if tryToLogIn(r.FormValue("username"), r.FormValue("password")) == Correct {
+		usernameCookie := &http.Cookie{
+			Name:    "username",
+			Value:   r.FormValue("username"),
+			Expires: time.Now().Add(10 * time.Hour),
+			Path:    "/",
+		}
+		http.SetCookie(w, usernameCookie)
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	if tryToLogIn(r.FormValue("username"), r.FormValue("password")) == NoMatch {
+		http.Redirect(w, r, "/incorrectPassword", http.StatusFound)
+		return
+	}
+	if tryToLogIn(r.FormValue("username"), r.FormValue("password")) == WrongPassword {
+		http.Redirect(w, r, "/incorrectPassword", http.StatusFound)
+	}
+}
+
+func userListHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	_, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 	tpl, err := template.ParseFiles("templates/header.html", "templates/userList.html")
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	err = tpl.ExecuteTemplate(w, "userList", users)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 }
 
-func usersHandler(w http.ResponseWriter, r *http.Request) {
+func usersHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	username := r.URL.String()[7:]
 	usernameCookie, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
@@ -369,17 +430,25 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 	if usernameCookie.Value != username {
 		user := getUser(username)
 		tpl, err := template.ParseFiles("templates/userPage.html", "templates/header.html")
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 
 		err = tpl.ExecuteTemplate(w, "userPage", user)
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 	} else {
 		user := getUser(username)
 		tpl, err := template.ParseFiles("templates/homePage.html", "templates/header.html")
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 
 		err = tpl.ExecuteTemplate(w, "homePage", user)
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -407,21 +476,37 @@ func accessLogMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	siteMux := http.NewServeMux()
+	httpMux := httprouter.New()
 
-	siteMux.HandleFunc("/", mainHandler)
-	siteMux.HandleFunc("/newPost", newPostHandler)
-	siteMux.HandleFunc("/logout", logoutHandler)
-	siteMux.HandleFunc("/register", registerHandler)
-	siteMux.HandleFunc("/registerAlreadyTaken", registerUsernameAlreadyTakenHandler)
-	siteMux.HandleFunc("/incorrectPassword", incorrectPasswordHandler)
-	siteMux.HandleFunc("/registerSuccess", registerSuccessHandler)
-	siteMux.HandleFunc("/userList", userListHandler)
-	siteMux.HandleFunc("/users/", usersHandler)
-	siteMux.Handle("/images/", http.StripPrefix("/images", http.FileServer(http.Dir("./images"))))
-	siteMux.Handle("/users/images/", http.StripPrefix("/users/images", http.FileServer(http.Dir("./images"))))
+	httpMux.GET("/", mainGetHandler)
+	httpMux.POST("/", mainPostHandler)
+	httpMux.GET("/logout", logoutHandler)
+	httpMux.GET("/newPost", newPostGetHandler)
+	httpMux.POST("/newPost", newPostPostHandler)
+	httpMux.GET("/register", registerGetHandler)
+	httpMux.POST("/register", registerPostHandler)
+	httpMux.GET("/registerAlreadyTaken", registerUsernameAlreadyTakenGetHandler)
+	httpMux.POST("/registerAlreadyTaken", registerUsernameAlreadyTakenPostHandler)
+	httpMux.GET("/incorrectPassword", incorrectPasswordGetHandler)
+	httpMux.POST("/incorrectPassword", incorrectPasswordPostHandler)
+	httpMux.GET("/registerSuccess", registerSuccessHandler)
+	httpMux.GET("/userList", userListHandler)
+	httpMux.GET("/users/", usersHandler)
+	httpMux.ServeFiles("/images/*filepath", http.Dir("./images"))
+	httpMux.ServeFiles("/users/images/*filepath", http.Dir("./images"))
+
+	siteMux.Handle("/", httpMux)
+	siteMux.Handle("/logout", httpMux)
+	siteMux.Handle("/newPost", httpMux)
+	siteMux.Handle("/register", httpMux)
+	siteMux.Handle("/registerAlreadyTaken", httpMux)
+	siteMux.Handle("/incorrectPassword", httpMux)
+	siteMux.Handle("/registerSuccess", httpMux)
+	siteMux.Handle("/userList", httpMux)
+	siteMux.Handle("/users/", httpMux)
 
 	siteHandler := accessLogMiddleware(siteMux)
 	siteHandler = panicMiddleware(siteHandler)
 
-	startServer(":8080", siteHandler)
+	startServer(":8080", httpMux)
 }
