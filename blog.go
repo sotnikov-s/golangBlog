@@ -141,7 +141,7 @@ func logoutHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 	return
 }
 
-func newPostGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func newPostGetHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	_, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -151,30 +151,31 @@ func newPostGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Para
 	if err != nil {
 		panic(err)
 	}
+	us := getUser(ps.ByName("username"))
 
-	err = tpl.ExecuteTemplate(w, "newPost", nil)
+	err = tpl.ExecuteTemplate(w, "newPost", us)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func newPostPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	usernameCookie, err := r.Cookie("username")
+func newPostPostHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	_, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	username := usernameCookie.Value
+	username := ps.ByName("username")
 	newPost := Post{
 		Title: r.FormValue("title"),
 		Body:  r.FormValue("body"),
 		Date:  time.Now().Format(timeFormat),
 	}
-	err = getUser(username).addUserToServer()
+	getUser(username).addPost(newPost)
+	err = getUser(username).refreshUserInfo()
 	if err != nil {
 		panic(err)
 	}
-	getUser(username).addPost(newPost)
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -217,7 +218,7 @@ func addUserToServer(incLogin string, incPassword string) error {
 	return nil
 }
 
-func (u User) addUserToServer() error {
+func (u User) refreshUserInfo() error {
 	parsedNewUser, err := json.Marshal(u)
 	if err != nil {
 		return errors.Wrap(err, "error while adding user data to server")
@@ -420,8 +421,8 @@ func userListHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 	}
 }
 
-func usersHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	username := r.URL.String()[7:]
+func usersHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	username := ps.ByName("username")
 	usernameCookie, err := r.Cookie("username")
 	if err == http.ErrNoCookie {
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -452,37 +453,36 @@ func usersHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	}
 }
 
-func panicMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("panicMiddleware", r.URL.Path)
-		defer func() {
-			if err := recover(); err != nil {
-				log.Println("recovered", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+type Middleware struct {
+	next http.Handler
 }
 
-func accessLogMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("accessLogMiddleware", r.URL.Path)
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		fmt.Printf("[%s] %s, %s %s\n-\n", r.Method, r.RemoteAddr, r.URL.Path, time.Since(start))
-	})
+func newMiddleware(next http.Handler) *Middleware {
+	return &Middleware{next: next}
+}
+
+func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("panicMiddleware", r.URL.Path)
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println("recovered", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
+	}()
+	fmt.Println("accessLogMiddleware", r.URL.Path)
+	start := time.Now()
+	m.next.ServeHTTP(w, r)
+	fmt.Printf("[%s] %s, %s %s\n-\n", r.Method, r.RemoteAddr, r.URL.Path, time.Since(start))
 }
 
 func main() {
-	siteMux := http.NewServeMux()
 	httpMux := httprouter.New()
 
 	httpMux.GET("/", mainGetHandler)
 	httpMux.POST("/", mainPostHandler)
 	httpMux.GET("/logout", logoutHandler)
-	httpMux.GET("/newPost", newPostGetHandler)
-	httpMux.POST("/newPost", newPostPostHandler)
+	httpMux.GET("/users/:username/newPost", newPostGetHandler)
+	httpMux.POST("/users/:username/newPost", newPostPostHandler)
 	httpMux.GET("/register", registerGetHandler)
 	httpMux.POST("/register", registerPostHandler)
 	httpMux.GET("/registerAlreadyTaken", registerUsernameAlreadyTakenGetHandler)
@@ -491,22 +491,11 @@ func main() {
 	httpMux.POST("/incorrectPassword", incorrectPasswordPostHandler)
 	httpMux.GET("/registerSuccess", registerSuccessHandler)
 	httpMux.GET("/userList", userListHandler)
-	httpMux.GET("/users/", usersHandler)
+	httpMux.GET("/users/:username", usersHandler)
 	httpMux.ServeFiles("/images/*filepath", http.Dir("./images"))
-	httpMux.ServeFiles("/users/images/*filepath", http.Dir("./images"))
+	httpMux.ServeFiles("/users/:username/images/*filepath", http.Dir("./images"))
 
-	siteMux.Handle("/", httpMux)
-	siteMux.Handle("/logout", httpMux)
-	siteMux.Handle("/newPost", httpMux)
-	siteMux.Handle("/register", httpMux)
-	siteMux.Handle("/registerAlreadyTaken", httpMux)
-	siteMux.Handle("/incorrectPassword", httpMux)
-	siteMux.Handle("/registerSuccess", httpMux)
-	siteMux.Handle("/userList", httpMux)
-	siteMux.Handle("/users/", httpMux)
+	m := newMiddleware(httpMux)
 
-	siteHandler := accessLogMiddleware(siteMux)
-	siteHandler = panicMiddleware(siteHandler)
-
-	startServer(":8080", httpMux)
+	startServer(":8080", m)
 }
