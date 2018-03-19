@@ -1,1 +1,1 @@
-{"Username":"admin","Password":"123","ID":1,"PostCount":0,"Posts":[]}
+{"Username":"admin","Password":"123","ID":1,"PostCount":4,"Posts":[{"Title":"test","Body":"test","Date":"03.19.2018 10:21:04"},{"Title":"123","Body":"123","Date":"03.19.2018 10:21:39"},{"Title":"YEAH","Body":"VICTORY","Date":"03.19.2018 10:30:23"},{"Title":"ererer","Body":"erererer","Date":"03.19.2018 11:02:31"}]}
