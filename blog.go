@@ -10,6 +10,7 @@ import (
 	"src/github.com/julienschmidt/httprouter"
 	"src/github.com/pkg/errors"
 	"time"
+	"src/github.com/asaskevich/govalidator"
 )
 
 // base format: Mon Jan 2 15:04:05 -0700 MST 2006
@@ -24,11 +25,11 @@ const (
 )
 
 type User struct {
-	Username  string
-	Password  string
-	ID        int
-	PostCount int
-	Posts     []Post
+	Username  string	`valid:"alphanum, required, runelength(3|16)"`
+	Password  string	`valid:"alphanum, required, runelength(3|16)"`
+	ID        int		`json:"id, int"valid:"required"`
+	PostCount int		`valid:"-"`
+	Posts     []Post	`valid:"-"`
 }
 
 func getUser(username string) *User {
@@ -40,15 +41,25 @@ func getUser(username string) *User {
 	return nil
 }
 
-func (u *User) addPost(post Post) {
+func (u *User) addPost(post Post) error {
+	_, err := govalidator.ValidateStruct(post)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("user:%s ID:%v failed to add a new post: " +
+			"it doesn't pass validation\n", u.Username, u.ID))
+	}
 	u.Posts = append(u.Posts, post)
 	u.PostCount++
+	return nil
+}
+
+func setID() {
+	ID++
 }
 
 type Post struct {
-	Title string
-	Body  string
-	Date  string
+	Title string	`valid:"required, ascii, runelength(1|30)"`
+	Body  string	`valid:"required, ascii, runelength(1|300)"`
+	Date  string	`valid:"-"`
 }
 
 func (u User) NoPosts() bool {
@@ -67,17 +78,27 @@ func startServer(addr string, handler http.Handler) {
 			log.Println(err, "reading file error")
 			return
 		}
+
 		us := User{}
+
 		err = json.Unmarshal(data, &us)
 		if err != nil {
 			log.Println(err, "unmarshal error")
 			return
 		}
+
+		_, err = govalidator.ValidateStruct(us)
+		if err != nil {
+			log.Printf("can't upload data to program: user:%s ID:%v doesn't pass validation\n",
+				us.Username, us.ID)
+			return
+		}
+
 		users = append(users, &us)
 		ID++
 	}
 
-	fmt.Println("Server started at", addr, "\n")
+	fmt.Print("Server started at", addr, "\n\n")
 	http.ListenAndServe(addr, handler)
 }
 
@@ -166,18 +187,43 @@ func newPostPostHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Pa
 		return
 	}
 	username := ps.ByName("username")
+
 	newPost := Post{
 		Title: r.FormValue("title"),
 		Body:  r.FormValue("body"),
 		Date:  time.Now().Format(timeFormat),
 	}
-	getUser(username).addPost(newPost)
+
+	err = getUser(username).addPost(newPost)
+	if err != nil {
+		http.Redirect(w, r, "/users/"+username+"/newPostInvalidSymbols", http.StatusFound)
+		log.Println(err)
+		return
+	}
 	err = getUser(username).refreshUserInfo()
 	if err != nil {
 		panic(err)
 	}
 
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func newPostInvalidSymbolsGetHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	_, err := r.Cookie("username")
+	if err == http.ErrNoCookie {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	tpl, err := template.ParseFiles("templates/header.html", "templates/newPostInvalidSymbols.html")
+	if err != nil {
+		panic(err)
+	}
+	us := getUser(ps.ByName("username"))
+
+	err = tpl.ExecuteTemplate(w, "newPostInvalidSymbols", us)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func tryToLogIn(incLogin string, incPassword string) string {
@@ -197,10 +243,6 @@ func tryToLogIn(incLogin string, incPassword string) string {
 	return Correct
 }
 
-func setID() {
-	ID++
-}
-
 func addUserToServer(incLogin string, incPassword string) error {
 	newUser := &User{
 		Username:  incLogin,
@@ -209,6 +251,11 @@ func addUserToServer(incLogin string, incPassword string) error {
 		PostCount: 0,
 		Posts:     make([]Post, 0),
 	}
+	_, err := govalidator.ValidateStruct(newUser)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("new user struct is invalid: %s", newUser))
+	}
+
 	parsedNewUser, err := json.Marshal(newUser)
 	if err != nil {
 		return errors.Wrap(err, "error while adding user data to server")
@@ -219,16 +266,21 @@ func addUserToServer(incLogin string, incPassword string) error {
 }
 
 func (u User) refreshUserInfo() error {
+	_, err := govalidator.ValidateStruct(u)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("new user struct is invalid: %s", u))
+	}
+
 	parsedNewUser, err := json.Marshal(u)
 	if err != nil {
-		return errors.Wrap(err, "error while adding user data to server")
+		return errors.Wrap(err, "error while refreshing user's data on server")
 	}
 
 	ioutil.WriteFile("data/accounts/"+u.Username+".txt", parsedNewUser, 0600)
 	return nil
 }
 
-func addUserToUsers(incLogin string, incPassword string) {
+func addUserToUsers(incLogin string, incPassword string) error {
 	newUser := &User{
 		Username:  incLogin,
 		Password:  incPassword,
@@ -236,8 +288,13 @@ func addUserToUsers(incLogin string, incPassword string) {
 		PostCount: 0,
 		Posts:     make([]Post, 0),
 	}
+	_, err := govalidator.ValidateStruct(newUser)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("new user struct is invalid: %s", newUser))
+	}
 
 	users = append(users, newUser)
+	return nil
 }
 
 func registerGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -266,20 +323,25 @@ func registerPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Pa
 	incAccount := r.FormValue("account")
 	incPassword := r.FormValue("password")
 	if UsernameExists(incAccount) {
-		http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
+		http.Redirect(w, r, "/registerUsernameAlreadyTaken", http.StatusFound)
 		return
 	}
 	err = addUserToServer(incAccount, incPassword)
 	if err != nil {
-		panic(err)
+		http.Redirect(w, r, "/registerInvalidSymbols", http.StatusFound)
+		return
+	}
+	err = addUserToUsers(incAccount, incPassword)
+	if err != nil {
+		http.Redirect(w, r, "/registerInvalidSymbols", http.StatusFound)
+		return
 	}
 
-	addUserToUsers(incAccount, incPassword)
 	setID()
 	registerSuccessCookie := http.Cookie{
-		Name:   "registerSuccess",
-		Value:  "true",
-		MaxAge: 1,
+		Name:    "registerSuccess",
+		Value:   "true",
+		MaxAge: 60,
 	}
 	http.SetCookie(w, &registerSuccessCookie)
 	http.Redirect(w, r, "/registerSuccess", http.StatusFound)
@@ -302,31 +364,21 @@ func registerUsernameAlreadyTakenGetHandler(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func registerUsernameAlreadyTakenPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func registerInvalidSymbolsGetHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	usernameCookie, err := r.Cookie("username")
 	if err != http.ErrNoCookie {
 		http.Redirect(w, r, "/users/"+usernameCookie.Value, http.StatusFound)
 		return
 	}
-	incAccount := r.FormValue("account")
-	incPassword := r.FormValue("password")
-	if UsernameExists(incAccount) {
-		http.Redirect(w, r, "/registerAlreadyTaken", http.StatusFound)
-		return
-	}
-	err = addUserToServer(incAccount, incPassword)
+	tpl, err := template.ParseFiles("templates/noCookieHeader.html", "templates/registerInvalidSymbols.html")
 	if err != nil {
 		panic(err)
 	}
-	addUserToUsers(incAccount, incPassword)
-	setID()
-	registerSuccessCookie := http.Cookie{
-		Name:    "registerSuccess",
-		Value:   "true",
-		Expires: time.Now().Add(10 * time.Second),
+
+	err = tpl.ExecuteTemplate(w, "registerInvalidSymbols", nil)
+	if err != nil {
+		panic(err)
 	}
-	http.SetCookie(w, &registerSuccessCookie)
-	http.Redirect(w, r, "/registerSuccess", http.StatusFound)
 }
 
 func UsernameExists(username string) bool {
@@ -483,10 +535,14 @@ func main() {
 	httpMux.GET("/logout", logoutHandler)
 	httpMux.GET("/users/:username/newPost", newPostGetHandler)
 	httpMux.POST("/users/:username/newPost", newPostPostHandler)
+	httpMux.GET("/users/:username/newPostInvalidSymbols", newPostInvalidSymbolsGetHandler)
+	httpMux.POST("/users/:username/newPostInvalidSymbols", newPostPostHandler)
 	httpMux.GET("/register", registerGetHandler)
 	httpMux.POST("/register", registerPostHandler)
-	httpMux.GET("/registerAlreadyTaken", registerUsernameAlreadyTakenGetHandler)
-	httpMux.POST("/registerAlreadyTaken", registerUsernameAlreadyTakenPostHandler)
+	httpMux.GET("/registerUsernameAlreadyTaken", registerUsernameAlreadyTakenGetHandler)
+	httpMux.POST("/registerUsernameAlreadyTaken", registerPostHandler)
+	httpMux.GET("/registerInvalidSymbols", registerInvalidSymbolsGetHandler)
+	httpMux.POST("/registerInvalidSymbols", registerPostHandler)
 	httpMux.GET("/incorrectPassword", incorrectPasswordGetHandler)
 	httpMux.POST("/incorrectPassword", incorrectPasswordPostHandler)
 	httpMux.GET("/registerSuccess", registerSuccessHandler)
