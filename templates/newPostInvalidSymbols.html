@@ -1,12 +1,12 @@
-{{define "newPost"}}
+{{define "newPostInvalidSymbols"}}
 
 {{template "header"}}
 
 <html>
     <body>
-    Please use only ASCII values from 1 and up to 30 symbols in field "Title"<br>
-    and from 1 and up to 300 symbols in field "Body"<br><br>
-    <form action="/users/{{.Username}}/newPost" method="post">
+    <span style="color: red; ">Please use only ASCII values from 1 and up to 30 symbols in field "Title"<br>
+        and from 1 and up to 300 symbols in field "Body"</span><br><br>
+    <form action="/users/{{.Username}}/newPostInvalidSymbols" method="post">
         Title: <br /><input type="text" name="title" minlength="1" maxlength="30" size="38"><br />
         Body: <br /><textarea name="body" cols="40" rows="10" minlength="1" maxlength="300"></textarea><br />
         <input type="submit" value="Submit">
