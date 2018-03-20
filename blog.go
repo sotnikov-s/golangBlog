@@ -7,9 +7,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"time"
+
 	"src/github.com/julienschmidt/httprouter"
 	"src/github.com/pkg/errors"
-	"time"
 	"src/github.com/asaskevich/govalidator"
 )
 
@@ -47,9 +48,36 @@ func (u *User) addPost(post Post) error {
 		return errors.Wrap(err, fmt.Sprintf("user:%s ID:%v failed to add a new post: " +
 			"it doesn't pass validation\n", u.Username, u.ID))
 	}
-	u.Posts = append(u.Posts, post)
+	u.Posts = appendPost(u.Posts, post)
 	u.PostCount++
 	return nil
+}
+
+func (p Post) isEmpty() bool {
+	if p.Title != "" && p.Body != "" && p.Date !="" {
+		return false
+	}
+	return true
+}
+
+func appendPost(dst []Post, item Post) []Post {
+	if len(dst) == 0 {
+		dst = append(dst, item)
+		return dst
+	}
+	newPosts := make([]Post, 0)
+	newPosts = append(newPosts, item)
+	for i := 0; i < len(dst); i++ {
+		if dst[i].isEmpty() {
+			dst = append(dst[:i], dst[i+1:]...)
+			i--
+		}
+	}
+	for i := 0; i < len(dst); i++ {
+		newPosts = append(newPosts, dst[i])
+	}
+	fmt.Println("len:", len(newPosts), "cap:", cap(newPosts))
+	return newPosts
 }
 
 func setID() {
@@ -65,6 +93,24 @@ type Post struct {
 func (u User) NoPosts() bool {
 	return u.PostCount == 0
 }
+
+//func (p Post) isEmpty() bool {
+//	if p.Title != "" && p.Body != "" && p.Date !="" {
+//		return false
+//	}
+//	return true
+//}
+//
+//func reversePosts(p []Post) []Post {
+//	p2 := make([]Post, 0)
+//	for i, v := range p {
+//		if v.isEmpty() {
+//			continue
+//		}
+//		p2 = append(p2, p[len(p)-1-i])
+//	}
+//	return p2
+//}
 
 func startServer(addr string, handler http.Handler) {
 	files, err := ioutil.ReadDir("data/accounts")
@@ -131,7 +177,7 @@ func mainPostHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 		usernameCookie := &http.Cookie{
 			Name:    "username",
 			Value:   r.FormValue("username"),
-			Expires: time.Now().Add(10 * time.Hour),
+			Expires: time.Now().Add(10 * time.Minute),
 			Path:    "/",
 		}
 		http.SetCookie(w, usernameCookie)
@@ -440,7 +486,7 @@ func incorrectPasswordPostHandler(w http.ResponseWriter, r *http.Request, _ http
 		usernameCookie := &http.Cookie{
 			Name:    "username",
 			Value:   r.FormValue("username"),
-			Expires: time.Now().Add(10 * time.Hour),
+			Expires: time.Now().Add(10 * time.Minute),
 			Path:    "/",
 		}
 		http.SetCookie(w, usernameCookie)
@@ -482,7 +528,7 @@ func usersHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) 
 	}
 	if usernameCookie.Value != username {
 		user := getUser(username)
-		tpl, err := template.ParseFiles("templates/userPage.html", "templates/header.html")
+		tpl, err := template.ParseFiles("templates/header.html", "templates/userPage.html")
 		if err != nil {
 			panic(err)
 		}
@@ -493,7 +539,7 @@ func usersHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) 
 		}
 	} else {
 		user := getUser(username)
-		tpl, err := template.ParseFiles("templates/homePage.html", "templates/header.html")
+		tpl, err := template.ParseFiles("templates/header.html", "templates/homePage.html")
 		if err != nil {
 			panic(err)
 		}
@@ -547,7 +593,7 @@ func main() {
 	httpMux.POST("/incorrectPassword", incorrectPasswordPostHandler)
 	httpMux.GET("/registerSuccess", registerSuccessHandler)
 	httpMux.GET("/userList", userListHandler)
-	httpMux.GET("/users/:username", usersHandler)
+	httpMux.GET("/users/:username/", usersHandler)
 	httpMux.ServeFiles("/images/*filepath", http.Dir("./images"))
 	httpMux.ServeFiles("/users/:username/images/*filepath", http.Dir("./images"))
 
