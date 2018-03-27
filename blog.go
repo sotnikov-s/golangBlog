@@ -33,6 +33,10 @@ type User struct {
 	Posts     []Post	`valid:"-"`
 }
 
+func setID() {
+	ID++
+}
+
 func getUser(username string) *User {
 	for _, us := range users {
 		if username == us.Username {
@@ -40,6 +44,16 @@ func getUser(username string) *User {
 		}
 	}
 	return nil
+}
+
+type Post struct {
+	Title string	`valid:"required, ascii, runelength(1|30)"`
+	Body  string	`valid:"required, ascii, runelength(1|300)"`
+	Date  string	`valid:"-"`
+}
+
+func (u User) NoPosts() bool {
+	return u.PostCount == 0
 }
 
 func (u *User) addPost(post Post) error {
@@ -79,38 +93,6 @@ func appendPost(dst []Post, item Post) []Post {
 	fmt.Println("len:", len(newPosts), "cap:", cap(newPosts))
 	return newPosts
 }
-
-func setID() {
-	ID++
-}
-
-type Post struct {
-	Title string	`valid:"required, ascii, runelength(1|30)"`
-	Body  string	`valid:"required, ascii, runelength(1|300)"`
-	Date  string	`valid:"-"`
-}
-
-func (u User) NoPosts() bool {
-	return u.PostCount == 0
-}
-
-//func (p Post) isEmpty() bool {
-//	if p.Title != "" && p.Body != "" && p.Date !="" {
-//		return false
-//	}
-//	return true
-//}
-//
-//func reversePosts(p []Post) []Post {
-//	p2 := make([]Post, 0)
-//	for i, v := range p {
-//		if v.isEmpty() {
-//			continue
-//		}
-//		p2 = append(p2, p[len(p)-1-i])
-//	}
-//	return p2
-//}
 
 func startServer(addr string, handler http.Handler) {
 	files, err := ioutil.ReadDir("data/accounts")
