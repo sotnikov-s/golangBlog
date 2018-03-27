@@ -1,9 +1,9 @@
 {{define "userList"}}
 
-     {{template "header"}}
-     Our population is {{len .}}!<br><br>
-     {{range .}}
+{{template "header"}}
+Our population is {{len .}}!<br><br>
+{{range .}}
      <a href=/users/{{.Username}}>{{.Username}}</a><br>
-             {{end}}
+{{end}}
 
 {{end}}

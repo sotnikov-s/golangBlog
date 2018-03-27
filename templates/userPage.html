@@ -13,17 +13,17 @@
 </style>
 
 <h1>This page belongs to <i>{{.Username}}</i></h1>
-<br>
-ID: {{.ID}}<br>
-{{if .NoPosts}} This user doesn't have posted thoughts yet.
-{{else}}
-{{.Username}} has {{.PostCount}} posts:<br>
-{{range .Posts}}
-<div class="col">
-    <p>---------{{.Date}} <b>{{.Title}}</b>---------<br>
-    {{.Body}}</p><br><br>
-</div>
-{{ end }}
-{{ end }}
+    <br>
+    ID: {{.ID}}<br>
+    {{if .NoPosts}} This user doesn't have posted thoughts yet.
+        {{else}}
+        {{.Username}} has {{.PostCount}} posts:<br>
+        {{range .Posts}}
+            <div class="posts">
+                <p>---------{{.Date}} <b>{{.Title}}</b>---------<br>
+                {{.Body}}</p><br><br>
+            </div>
+        {{ end }}
+    {{ end }}
 
 {{ end }}
